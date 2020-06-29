@@ -1,0 +1,167 @@
+<html lang="en">
+<head>
+    <title>Bluetooth Availability</title>
+    <script>
+        // Add a global error event listener early on in the page load, to help ensure that browsers
+        // which don't support specific functionality still end up displaying a meaningful message.
+        window.addEventListener('error', function(error) {
+            if (ChromeSamples && ChromeSamples.setStatus) {
+            console.error(error);
+            ChromeSamples.setStatus(error.message + ' (Your browser may not support this feature.)');
+            error.preventDefault();
+            }
+        });
+
+        var ChromeSamples = {
+          log: function() {
+            var line = Array.prototype.slice.call(arguments).map(function(argument) {
+              return typeof argument === 'string' ? argument : JSON.stringify(argument);
+            }).join(' ');
+      
+            document.querySelector('#log').textContent += line + '\n';
+          },
+      
+          clearLog: function() {
+            document.querySelector('#log').textContent = '';
+          },
+      
+          setStatus: function(status) {
+            document.querySelector('#status').textContent = status;
+          },
+      
+          setContent: function(newContent) {
+            var content = document.querySelector('#content');
+            while(content.hasChildNodes()) {
+              content.removeChild(content.lastChild);
+            }
+            content.appendChild(newContent);
+          }
+        };
+    </script>
+</head>
+<body>
+
+    <form>
+        <button>Get Bluetooth Device Info</button>
+      </form>
+      <script>
+document.querySelector('form').addEventListener('submit', function(event) {
+    event.stopPropagation();
+    event.preventDefault();
+
+    if (isWebBluetoothEnabled()) {
+      onButtonClick();
+    }
+  });
+
+      </script>
+
+    <h3>Live Output</h3>
+    <div id="output" class="output">
+    <div id="content"></div>
+    <div id="status"></div>
+    <pre id="log"></pre>
+    </div>
+
+ 
+      
+      <script>
+        log = ChromeSamples.log;
+      
+        function isWebBluetoothEnabled() {
+          if (navigator.bluetooth) {
+            return true;
+          } else {
+            ChromeSamples.setStatus('Web Bluetooth API is not available.\n' +
+                'Please make sure the "Experimental Web Platform features" flag is enabled.');
+            return false;
+          }
+        }
+
+
+        navigator.bluetooth.getAvailability()
+      .then(isBluetoothAvailable => {
+        log(`> Bluetooth is ${isBluetoothAvailable ? 'available' : 'unavailable'}`);
+      });
+      
+      if ('onavailabilitychanged' in navigator.bluetooth) {
+        navigator.bluetooth.addEventListener('availabilitychanged', function(event) {
+          log(`> Bluetooth is ${event.value ? 'available' : 'unavailable'}`);
+        });
+      }
+      
+function onButtonClick() {
+    let serviceUuid = 'e95d0753-251d-470a-a062-fa1922dfa9a8';
+  let characteristicUuid = 'e95dca4b-251d-470a-a062-fa1922dfa9a8';
+    let options = {};
+    options.acceptAllDevices = true;     
+    log('Requesting Bluetooth Device...');   
+  navigator.bluetooth.requestDevice({
+  // filters: [...] <- Prefer filters to save energy & show relevant devices.
+      acceptAllDevices: true,
+      optionalServices: [serviceUuid]})
+
+  .then(device => {
+    log('> Name:             ' + device.name);
+    log('> Id:               ' + device.id);
+    log('> Connected:        ' + device.gatt.connected);
+    log('Connecting to GATT Server...');
+    return device.gatt.connect();
+  })
+  .then(server => {
+    log('Getting Service...');
+    return server.getPrimaryService(serviceUuid);
+  })
+  .then(service => {
+    log('Getting Characteristic...');
+    return service.getCharacteristic(characteristicUuid);
+  })
+  .then(characteristic => {
+    log('Getting Descriptors...');
+    return characteristic.getDescriptors();
+  })
+  .then(descriptors => {
+    let queue = Promise.resolve();
+    descriptors.forEach(descriptor => {
+      switch (descriptor.uuid) {
+
+        case BluetoothUUID.getDescriptor('gatt.client_characteristic_configuration'):
+          queue = queue.then(_ => descriptor.readValue()).then(value => {
+            log('> Client Characteristic Configuration:');
+            let notificationsBit = value.getUint8(0) & 0b01;
+            log('  > Notifications: ' + (notificationsBit ? 'ON' : 'OFF'));
+            let indicationsBit = value.getUint8(0) & 0b10;
+            log('  > Indications: ' + (indicationsBit ? 'ON' : 'OFF'));
+          });
+          break;
+
+        case BluetoothUUID.getDescriptor('gatt.characteristic_user_description'):
+          queue = queue.then(_ => descriptor.readValue()).then(value => {
+            let decoder = new TextDecoder('utf-8');
+            log('> Characteristic User Description: ' + decoder.decode(value));
+          });
+          break;
+
+        case BluetoothUUID.getDescriptor('report_reference'):
+          queue = queue.then(_ => descriptor.readValue()).then(value => {
+            log('> Report Reference:');
+            log('  > Report ID: ' + value.getUint8(0));
+            log('  > Report Type: ' + getReportType(value));
+          });
+          break;
+
+        default: log('> Unknown Descriptor: ' + descriptor.uuid);
+      }
+    });
+    return queue;
+  })
+  .catch(error => {
+    log('Argh! ' + error);
+  });
+  
+}
+      </script>
+          
+       
+</body>
+</html>
